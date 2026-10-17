@@ -49,7 +49,7 @@ func TestWakeAndReconnect(t *testing.T) {
 	err = admin.QueryRow(ctx, `
 		SELECT count(*) FROM (
 			SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-			WHERE query = 'LISTEN deliveries' AND pid <> pg_backend_pid()) s`).Scan(&n)
+			WHERE query = 'LISTEN deliveries' AND datname = current_database() AND pid <> pg_backend_pid()) s`).Scan(&n)
 	if err != nil || n != 1 {
 		t.Fatalf("terminated %d listener backends (err=%v), want 1", n, err)
 	}

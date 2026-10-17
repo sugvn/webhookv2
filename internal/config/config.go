@@ -18,6 +18,7 @@ type Config struct {
 	MaxAttempts  int
 	RetryBase    time.Duration
 	RetryCap     time.Duration
+	HTTPAddr string
 }
 
 func Load() (Config, error) {
@@ -33,6 +34,7 @@ func Load() (Config, error) {
 		MaxAttempts:  get(envInt("MAX_ATTEMPTS", 5)),
 		RetryBase:    dur(envDur("RETRY_BASE", 30*time.Second)),
 		RetryCap:     dur(envDur("RETRY_CAP", 10*time.Minute)),
+		HTTPAddr:     envStr("HTTP_ADDR", ":8080"),
 	}
 	if err := errors.Join(errs...); err != nil {
 		return Config{}, err

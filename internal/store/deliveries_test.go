@@ -24,7 +24,7 @@ func testStore(t *testing.T) (*Store, *pgxpool.Pool) {
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `TRUNCATE events RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE producers RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	var pid int64

@@ -2,22 +2,25 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/sugvn/webhookv2/internal/api"
 	"github.com/sugvn/webhookv2/internal/config"
 	"github.com/sugvn/webhookv2/internal/db"
 	"github.com/sugvn/webhookv2/internal/listener"
+	"github.com/sugvn/webhookv2/internal/registry"
 	"github.com/sugvn/webhookv2/internal/sender"
 	"github.com/sugvn/webhookv2/internal/store"
 	"github.com/sugvn/webhookv2/internal/worker"
 )
 
-// Max wait for in-flight sends after a signal. Beyond this we exit and let leases expire.
 const shutdownGrace = 30 * time.Second
 
 func main() {
@@ -47,37 +50,58 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	st := store.New(pool)
 	lis := listener.New(cfg.DatabaseURL, log)
-	wp := worker.New(store.New(pool), sender.New(), worker.Config{
+	wp := worker.New(st, sender.New(), worker.Config{
 		Workers:      cfg.Workers,
 		LeaseBuffer:  cfg.LeaseBuffer,
 		PollInterval: cfg.PollInterval,
-		Policy:       cfg.Retry(), // same MaxAttempts goes to claim_deliveries()
+		Policy:       cfg.Retry(),
 	}, lis.Wake(), log)
 
+	srv := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           api.New(registry.New(st, 0), st, log),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); lis.Run(ctx) }()
 	go func() { defer wg.Done(); wp.Run(ctx) }()
+	go func() {
+		defer wg.Done()
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("http server failed", "err", err)
+			stop() // take the whole process down
+		}
+	}()
 
-	log.Info("webhookd started", "workers", cfg.Workers, "max_attempts", cfg.MaxAttempts,
-		"poll", cfg.PollInterval, "lease_buffer", cfg.LeaseBuffer)
+	log.Info("webhookd started", "http", cfg.HTTPAddr, "workers", cfg.Workers,
+		"max_attempts", cfg.MaxAttempts, "poll", cfg.PollInterval, "lease_buffer", cfg.LeaseBuffer)
 
 	<-ctx.Done()
-	stop() // restore default handling: a second Ctrl-C kills the process immediately
+	stop() // a second Ctrl-C kills immediately
 	log.Info("shutting down", "grace", shutdownGrace)
 
+	sctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
 	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
+	go func() {
+		_ = srv.Shutdown(sctx) // stop accepting events, finish requests in flight
+		wg.Wait()              // workers finish their current send
+		close(done)
+	}()
 	select {
 	case <-done:
 		log.Info("stopped cleanly")
 		return nil
-	case <-time.After(shutdownGrace):
-		// os.Exit, not return: the deferred pool.Close() blocks until every connection
-		// is released, which is exactly what is stuck here.
+	case <-sctx.Done():
 		log.Error("grace period exceeded; in-flight leases will expire and be reclaimed")
-		os.Exit(1)
+		os.Exit(1) // not return: the deferred pool.Close() would block on stuck connections
 		return nil
 	}
 }
