@@ -191,26 +191,7 @@ The whole window is roughly 4 to 8 minutes plus up to `POLL_INTERVAL` of pickup 
 ---
 
 ## Architecture
-
-```
- producer ──HTTP──▶  api ──▶ registry (auth: bcrypt + short-lived cache)
-                      │
-                      ▼
-                   store.InsertEvent
-                      │   INSERT ... ON CONFLICT (producer_id, uuid) DO NOTHING
-                      ▼
-   ┌────────────── PostgreSQL ──────────────────────────────────────────┐
-   │ events ──AFTER INSERT trigger (same transaction)──▶ deliveries     │
-   │                                   one row per matching subscription│
-   │                                   └─ pg_notify('deliveries')       │
-   └───────────────┬───────────────────────────────▲────────────────────┘
-                   │ NOTIFY (a hint)               │ claim_deliveries():
-                   ▼                               │ FOR UPDATE SKIP LOCKED + lease
-            listener ──wake──▶ worker pool ────────┘
-         (dedicated conn,      N goroutines:  claim → sender (HTTP POST) → complete │ reschedule │ dead-letter
-          reconnect+drain)              ▲
-                   poll ticker ─────────┘  (correctness backstop)
-```
+![Architecture Diagram](architecture.svg)
 
 Packages:
 
