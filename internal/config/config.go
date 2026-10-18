@@ -19,6 +19,7 @@ type Config struct {
 	RetryBase    time.Duration
 	RetryCap     time.Duration
 	HTTPAddr string
+	DBPoolMax int 
 }
 
 func Load() (Config, error) {
@@ -35,6 +36,7 @@ func Load() (Config, error) {
 		RetryBase:    dur(envDur("RETRY_BASE", 30*time.Second)),
 		RetryCap:     dur(envDur("RETRY_CAP", 10*time.Minute)),
 		HTTPAddr:     envStr("HTTP_ADDR", ":8080"),
+		DBPoolMax:    get(envInt("DB_POOL_MAX", 0)),
 	}
 	if err := errors.Join(errs...); err != nil {
 		return Config{}, err
@@ -54,7 +56,12 @@ func Load() (Config, error) {
 }
 
 // PoolSize: one connection per worker plus headroom. The listener has its own connection.
-func (c Config) PoolSize() int32 { return int32(c.Workers + 2) }
+func (c Config) PoolSize() int32 { 
+	if c.DBPoolMax > 0 {
+		return int32(c.DBPoolMax)
+	}
+	return int32(c.Workers + 2) 
+}
 
 // Retry builds the policy from the same MaxAttempts passed to claim_deliveries().
 func (c Config) Retry() retry.Policy {

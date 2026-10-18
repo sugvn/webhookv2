@@ -24,8 +24,8 @@ type Sender struct{ client *http.Client }
 
 func New() *Sender {
 	tr := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 16, // default is 2; many deliveries hit the same host
+		MaxIdleConns:        512,
+		MaxIdleConnsPerHost: 256,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 5 * time.Second,
 	}
